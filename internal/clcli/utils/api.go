@@ -7,6 +7,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"os"
 )
 
@@ -69,20 +70,14 @@ func (api *API) Login(username, password string) error {
 	return nil
 }
 
-func (api API) Upload(path, checksum string) (*http.Response, error) {
+func (api API) Upload(path, checksum,timestamp,mimeType string) (*http.Response, error) {
 	endpoint := fmt.Sprintf("%v/image/upload", api.base_url)
 
-	// Open the file to upload
 	fileToUpload, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil,err
 	}
 	defer fileToUpload.Close()
-
-	stat, err := fileToUpload.Stat()
-	if err != nil {
-		return nil, err
-	}
 
 	reader, writer := io.Pipe()
 
@@ -91,18 +86,19 @@ func (api API) Upload(path, checksum string) (*http.Response, error) {
 		return nil, err
 	}
 
-	// Create a multipart writer for the pipe
 	formWriter := multipart.NewWriter(writer)
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %v", api.tokens.Access_token))
-	req.Header.Add("Timestamp", fmt.Sprintf("%v", stat.ModTime().UnixMilli()))
+	req.Header.Add("Timestamp", fmt.Sprintf("%v", timestamp))
 	req.Header.Add("Content-Type", formWriter.FormDataContentType())
 
-	// Write to the pipe in a separate goroutine
 	go func() {
-		defer writer.Close()     // Close the writer to signal EOF
-		defer formWriter.Close() // Close the multipart writer
+		defer writer.Close()
+		defer formWriter.Close()
 
-		fieldWriter, err := formWriter.CreateFormFile(checksum, fileToUpload.Name())
+		headers := textproto.MIMEHeader{}
+		headers.Add("Content-Disposition", fmt.Sprintf("form-data; name=\"%v\"; filename=\"%v\"", checksum, fileToUpload.Name()))
+		headers.Add("Content-Type", mimeType)
+		fieldWriter, err := formWriter.CreatePart(headers)
 		if err != nil {
 			writer.CloseWithError(err)
 			return
@@ -117,36 +113,31 @@ func (api API) Upload(path, checksum string) (*http.Response, error) {
 	return api.client.Do(req)
 }
 
-func (api API) SyncFull() error {
+type remoteMedia struct {
+	Checksum string `json:"hash,omitempty"`
+}
+
+func (api API) SyncFull() ([]remoteMedia, error) {
 	endpoint := fmt.Sprintf("%v/sync/full", api.base_url)
 	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Add("Authorization", fmt.Sprintf("Bearer %v", api.tokens.Access_token))
 	req.Header.Add("Accept", "application/json")
 
-	type remoteMedia struct {
-		Checksum  string `json:"hash,omitempty"`
-	}
-
-	resp,err := api.client.Do(req)
+	resp, err := api.client.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
-
 	var syncFull []remoteMedia
 
 	decoder := json.NewDecoder(resp.Body)
 
 	err = decoder.Decode(&syncFull)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	for _,media := range syncFull {
-		fmt.Printf("%+v\n",media)
-	}
-	
-	return nil
+	return syncFull, nil
 }
