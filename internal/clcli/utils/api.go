@@ -49,7 +49,8 @@ func (api *API) Login(username, password string) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
+
+    req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := api.client.Do(req)
@@ -57,6 +58,11 @@ func (api *API) Login(username, password string) error {
 		return err
 	}
 	defer resp.Body.Close()
+
+    if resp.StatusCode == http.StatusForbidden {
+        fmt.Println("Password or username incorrect")
+        os.Exit(1)
+    }
 
 	decoder := json.NewDecoder(resp.Body)
 
@@ -70,12 +76,12 @@ func (api *API) Login(username, password string) error {
 	return nil
 }
 
-func (api API) Upload(path, checksum,timestamp,mimeType string) (*http.Response, error) {
+func (api API) Upload(path, checksum,timestamp,mimeType string) (int, error) {
 	endpoint := fmt.Sprintf("%v/image/upload", api.base_url)
 
 	fileToUpload, err := os.Open(path)
 	if err != nil {
-		return nil,err
+		return 0,err
 	}
 	defer fileToUpload.Close()
 
@@ -83,7 +89,7 @@ func (api API) Upload(path, checksum,timestamp,mimeType string) (*http.Response,
 
 	req, err := http.NewRequest("POST", endpoint, reader)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 
 	formWriter := multipart.NewWriter(writer)
@@ -110,7 +116,19 @@ func (api API) Upload(path, checksum,timestamp,mimeType string) (*http.Response,
 		}
 	}()
 
-	return api.client.Do(req)
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+
+    if resp.StatusCode == http.StatusUnauthorized {
+        err = api.RefreshToken()
+        if err != nil {
+            return 0, err
+        }
+        return api.Upload(path, checksum, timestamp, mimeType)
+    }
+    return resp.StatusCode,nil
 }
 
 type remoteMedia struct {
@@ -130,6 +148,15 @@ func (api API) SyncFull() ([]remoteMedia, error) {
 	if err != nil {
 		return nil, err
 	}
+
+    if resp.StatusCode == http.StatusUnauthorized {
+        err = api.RefreshToken()
+        if err != nil {
+            return nil, err
+        }
+        return api.SyncFull()
+    }
+
 	var syncFull []remoteMedia
 
 	decoder := json.NewDecoder(resp.Body)
@@ -140,4 +167,48 @@ func (api API) SyncFull() ([]remoteMedia, error) {
 	}
 
 	return syncFull, nil
+}
+
+func (api *API) RefreshToken() error {
+	endpoint := fmt.Sprintf("%v/refresh", api.base_url)
+
+	payload := struct {
+        AccessToken string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}{
+        AccessToken: api.tokens.Access_token,
+        RefreshToken: api.tokens.Refresh_token,
+	}
+
+	payload_json, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(payload_json))
+	if err != nil {
+		return err
+	}
+
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusOK {
+        fmt.Println("Failed to refresh token, please run the tool again")
+        os.Exit(1)
+    }
+
+	decoder := json.NewDecoder(resp.Body)
+
+	var tokens Tokens
+
+	err = decoder.Decode(&tokens)
+	if err != nil {
+		return err
+	}
+	api.tokens = tokens
+	return nil
+
 }

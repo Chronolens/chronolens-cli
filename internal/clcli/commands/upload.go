@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -12,12 +13,7 @@ import (
 	"github.com/schollz/progressbar/v3"
 )
 
-func Upload(base_url string, username string, password string, root_dir string) {
-	api := clcli.NewAPI(base_url)
-	err := api.Login(username, password)
-	if err != nil {
-		print(err.Error())
-	}
+func Upload(api clcli.API, root_dir string) {
 
 	remoteMedia, err := api.SyncFull()
 	if err != nil {
@@ -50,25 +46,24 @@ func Upload(base_url string, username string, password string, root_dir string) 
 			return nil
 		}
 
-        timestamp,mimeType,err := TimestampAndMIMEType(path, ok)
-        if err != nil {
-            return err
-        }
+		timestamp, mimeType, err := TimestampAndMIMEType(path, ok)
+		if err != nil {
+			return err
+		}
 
-		resp, err := api.Upload(path, checksum,timestamp,mimeType)
+		respStatusCode, err := api.Upload(path, checksum, timestamp, mimeType)
 		if err != nil {
 			return nil
 		}
 
-		switch resp.StatusCode {
-		case 200:
+		switch respStatusCode {
+		case http.StatusOK:
 			successful_bar.Add(1)
-		case 412:
+		case http.StatusPreconditionFailed:
 			duplicate = duplicate + 1
 		default:
 			failed = failed + 1
 		}
-        time.Sleep(1 * time.Second)
 		return nil
 	})
 	if err != nil {
@@ -78,16 +73,16 @@ func Upload(base_url string, username string, password string, root_dir string) 
 	fmt.Printf("Failed: %v\n", failed)
 }
 
-func TimestampAndMIMEType(path string, ok bool) (string,string, error) {
+func TimestampAndMIMEType(path string, ok bool) (string, string, error) {
 	fileToUpload, err := os.Open(path)
 	if err != nil {
-        return "", "", nil
+		return "", "", nil
 	}
 	defer fileToUpload.Close()
 
 	et, err := exiftool.NewExiftool()
 	if err != nil {
-        return "", "", nil
+		return "", "", nil
 	}
 	defer et.Close()
 
@@ -95,22 +90,22 @@ func TimestampAndMIMEType(path string, ok bool) (string,string, error) {
 
 	fileInfo := fileInfos[0]
 	if fileInfo.Err != nil {
-        return "", "", nil
+		return "", "", nil
 	}
 
 	mime_type := fileInfo.Fields["MIMEType"]
-    mime_type_string, ok := mime_type.(string)
+	mime_type_string, ok := mime_type.(string)
 	if !ok {
-        return "", "", nil
+		return "", "", nil
 	}
 
-    timestamp := getEXIFTimestamp(fileInfo)
-    
+	timestamp := getEXIFTimestamp(fileInfo)
+
 	return fmt.Sprintf("%v", timestamp), mime_type_string, nil
 }
 
 func getEXIFTimestamp(fileInfo exiftool.FileMetadata) int64 {
-    // Layouts for parsing
+	// Layouts for parsing
 	layoutWithSubSec := "2006:01:02 15:04:05.999999"
 	layoutNoSubSec := "2006:01:02 15:04:05"
 	layoutWithTZ := "2006:01:02 15:04:05-07:00"
@@ -146,5 +141,5 @@ func getEXIFTimestamp(fileInfo exiftool.FileMetadata) int64 {
 			return unixMillis
 		}
 	}
-    return time.Now().UTC().UnixMilli()
+	return time.Now().UTC().UnixMilli()
 }
