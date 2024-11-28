@@ -21,5 +21,5 @@ func CalculateChecksums(path string) (string, error) {
 		return "", err
 	}
 
-	return base64.URLEncoding.EncodeToString(hasher.Sum(nil)), nil
+	return base64.StdEncoding.EncodeToString(hasher.Sum(nil)), nil
 }
