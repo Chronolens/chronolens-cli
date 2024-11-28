@@ -6,14 +6,31 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
+	"syscall"
 	"time"
 
 	"github.com/barasher/go-exiftool"
 	"github.com/chronolens/chronolens-cli/internal/clcli/utils"
+
 	"github.com/schollz/progressbar/v3"
+	"golang.org/x/term"
 )
 
-func Upload(api clcli.API, root_dir string) {
+func Upload(api clcli.API, root_dir, username string) {
+
+	fmt.Println("Please input your password")
+	password_bytes, err := term.ReadPassword(int(syscall.Stdin))
+	if err != nil {
+		fmt.Println("Error reading password")
+	}
+	password := string(password_bytes)
+
+	err = api.Login(username, password)
+	if err != nil {
+		fmt.Println(err.Error())
+		os.Exit(1)
+	}
 
 	remoteMedia, err := api.SyncFull()
 	if err != nil {
@@ -25,7 +42,7 @@ func Upload(api clcli.API, root_dir string) {
 		remoteMediaSet[v.Checksum] = struct{}{}
 	}
 
-	successful_bar := progressbar.Default(-1, "Successful")
+	successful_bar := progressbar.Default(-1, "Uploading")
 	duplicate := 0
 	failed := 0
 
@@ -46,9 +63,10 @@ func Upload(api clcli.API, root_dir string) {
 			return nil
 		}
 
-		timestamp, mimeType, err := TimestampAndMIMEType(path, ok)
+
+		timestamp, mimeType, err := TimestampAndMIMEType(path)
 		if err != nil {
-			return err
+			return nil
 		}
 
 		respStatusCode, err := api.Upload(path, checksum, timestamp, mimeType)
@@ -69,34 +87,61 @@ func Upload(api clcli.API, root_dir string) {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Printf("\nDuplicate: %v\n", duplicate)
+	successful_bar.Exit()
+	fmt.Printf("Duplicate: %v\n", duplicate)
 	fmt.Printf("Failed: %v\n", failed)
 }
 
-func TimestampAndMIMEType(path string, ok bool) (string, string, error) {
+func CreateUser(api clcli.API, username string) {
+
+	fmt.Println("Please input the new user's password")
+	password_bytes, err := term.ReadPassword(int(syscall.Stdin))
+	if err != nil {
+		fmt.Println("Error reading password")
+	}
+	password := string(password_bytes)
+
+	err = api.Register(username, password)
+	if err != nil {
+		fmt.Println(err.Error())
+		os.Exit(1)
+	}
+}
+
+func TimestampAndMIMEType(path string) (string, string, error) {
 	fileToUpload, err := os.Open(path)
 	if err != nil {
-		return "", "", nil
+		return "", "", err
 	}
 	defer fileToUpload.Close()
 
 	et, err := exiftool.NewExiftool()
 	if err != nil {
-		return "", "", nil
+		return "", "", err
 	}
 	defer et.Close()
 
 	fileInfos := et.ExtractMetadata(path)
 
+	if len(fileInfos) == 0 {
+		return "", "", fmt.Errorf("No metadata found for file %v", path)
+	}
+
 	fileInfo := fileInfos[0]
 	if fileInfo.Err != nil {
-		return "", "", nil
+		return "", "", fileInfo.Err
 	}
 
 	mime_type := fileInfo.Fields["MIMEType"]
 	mime_type_string, ok := mime_type.(string)
 	if !ok {
-		return "", "", nil
+		return "", "", fmt.Errorf("No MIME type found for file %v", path)
+	}
+
+	ALLOWED_CONTENT_TYPES := []string{"image/png", "image/jpeg", "image/heic", "image/heif"}
+
+	if !slices.Contains(ALLOWED_CONTENT_TYPES, mime_type_string) {
+		return "", "", fmt.Errorf("Unsupported filetype for file %v", path)
 	}
 
 	timestamp := getEXIFTimestamp(fileInfo)
