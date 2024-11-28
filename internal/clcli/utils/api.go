@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/textproto"
 	"os"
+	"path/filepath"
 )
 
 type API struct {
@@ -50,7 +51,7 @@ func (api *API) Login(username, password string) error {
 		return err
 	}
 
-    req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := api.client.Do(req)
@@ -59,10 +60,10 @@ func (api *API) Login(username, password string) error {
 	}
 	defer resp.Body.Close()
 
-    if resp.StatusCode == http.StatusForbidden {
-        fmt.Println("Password or username incorrect")
-        os.Exit(1)
-    }
+	if resp.StatusCode == http.StatusForbidden {
+		fmt.Println("Password or username incorrect")
+		os.Exit(1)
+	}
 
 	decoder := json.NewDecoder(resp.Body)
 
@@ -76,12 +77,49 @@ func (api *API) Login(username, password string) error {
 	return nil
 }
 
-func (api API) Upload(path, checksum,timestamp,mimeType string) (int, error) {
+func (api *API) Register(username, password string) error {
+	endpoint := fmt.Sprintf("%v/register", api.base_url)
+	payload := struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}{
+		Username: username,
+		Password: password,
+	}
+
+	payload_json, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(payload_json))
+	if err != nil {
+		return err
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusForbidden {
+		fmt.Println("A User with that username already exists")
+		os.Exit(1)
+	}
+	fmt.Printf("Created user %v successfully\n", username)
+	return nil
+}
+
+func (api API) Upload(path, checksum, timestamp, mimeType string) (int, error) {
 	endpoint := fmt.Sprintf("%v/image/upload", api.base_url)
 
 	fileToUpload, err := os.Open(path)
 	if err != nil {
-		return 0,err
+		return 0, err
 	}
 	defer fileToUpload.Close()
 
@@ -100,9 +138,10 @@ func (api API) Upload(path, checksum,timestamp,mimeType string) (int, error) {
 	go func() {
 		defer writer.Close()
 		defer formWriter.Close()
+		filename := filepath.Base(path)
 
 		headers := textproto.MIMEHeader{}
-		headers.Add("Content-Disposition", fmt.Sprintf("form-data; name=\"%v\"; filename=\"%v\"", checksum, fileToUpload.Name()))
+		headers.Add("Content-Disposition", fmt.Sprintf("form-data; name=\"%v\"; filename=\"%v\"", checksum, filename))
 		headers.Add("Content-Type", mimeType)
 		fieldWriter, err := formWriter.CreatePart(headers)
 		if err != nil {
@@ -121,14 +160,15 @@ func (api API) Upload(path, checksum,timestamp,mimeType string) (int, error) {
 		return 0, err
 	}
 
-    if resp.StatusCode == http.StatusUnauthorized {
-        err = api.RefreshToken()
-        if err != nil {
-            return 0, err
-        }
-        return api.Upload(path, checksum, timestamp, mimeType)
-    }
-    return resp.StatusCode,nil
+	if resp.StatusCode == http.StatusUnauthorized {
+		err = api.RefreshToken()
+		if err != nil {
+			return 0, err
+		}
+		return api.Upload(path, checksum, timestamp, mimeType)
+	}
+
+	return resp.StatusCode, nil
 }
 
 type remoteMedia struct {
@@ -149,13 +189,13 @@ func (api API) SyncFull() ([]remoteMedia, error) {
 		return nil, err
 	}
 
-    if resp.StatusCode == http.StatusUnauthorized {
-        err = api.RefreshToken()
-        if err != nil {
-            return nil, err
-        }
-        return api.SyncFull()
-    }
+	if resp.StatusCode == http.StatusUnauthorized {
+		err = api.RefreshToken()
+		if err != nil {
+			return nil, err
+		}
+		return api.SyncFull()
+	}
 
 	var syncFull []remoteMedia
 
@@ -173,11 +213,11 @@ func (api *API) RefreshToken() error {
 	endpoint := fmt.Sprintf("%v/refresh", api.base_url)
 
 	payload := struct {
-        AccessToken string `json:"access_token"`
+		AccessToken  string `json:"access_token"`
 		RefreshToken string `json:"refresh_token"`
 	}{
-        AccessToken: api.tokens.Access_token,
-        RefreshToken: api.tokens.Refresh_token,
+		AccessToken:  api.tokens.Access_token,
+		RefreshToken: api.tokens.Refresh_token,
 	}
 
 	payload_json, err := json.Marshal(payload)
@@ -195,10 +235,10 @@ func (api *API) RefreshToken() error {
 	}
 	defer resp.Body.Close()
 
-    if resp.StatusCode != http.StatusOK {
-        fmt.Println("Failed to refresh token, please run the tool again")
-        os.Exit(1)
-    }
+	if resp.StatusCode != http.StatusOK {
+		fmt.Println("Failed to refresh token, please run the tool again")
+		os.Exit(1)
+	}
 
 	decoder := json.NewDecoder(resp.Body)
 
