@@ -132,7 +132,8 @@ OUTER:
 		_, err = os.Stat(filePath)
 		if os.IsNotExist(err) {
 			clcli.DownloadFile(fullMedia.MediaURL, filePath)
-            continue
+			backup_progress.Add(1)
+			continue
 		} else {
 			checksum, err := clcli.CalculateChecksums(filePath)
 			if err != nil {
@@ -151,9 +152,9 @@ OUTER:
 					newFilePath := filepath.Join(folderPath, newFileName)
 					_, err = os.Stat(newFilePath)
 					if os.IsNotExist(err) {
-						backup_progress.Add(1)
 						clcli.DownloadFile(fullMedia.MediaURL, newFilePath)
-                        break
+                        backup_progress.Add(1)
+						break
 					} else {
 						newChecksum, err := clcli.CalculateChecksums(newFilePath)
 						if err != nil {
