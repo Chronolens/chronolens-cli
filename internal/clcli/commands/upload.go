@@ -63,7 +63,6 @@ func Upload(api clcli.API, root_dir, username string) {
 			return nil
 		}
 
-
 		timestamp, mimeType, err := TimestampAndMIMEType(path)
 		if err != nil {
 			return nil
@@ -90,6 +89,90 @@ func Upload(api clcli.API, root_dir, username string) {
 	successful_bar.Exit()
 	fmt.Printf("Duplicate: %v\n", duplicate)
 	fmt.Printf("Failed: %v\n", failed)
+}
+
+func Backup(api clcli.API, dest, username string) {
+
+	fmt.Println("Please input your password")
+	password_bytes, err := term.ReadPassword(int(syscall.Stdin))
+	if err != nil {
+		fmt.Println("Error reading password")
+	}
+	password := string(password_bytes)
+
+	err = api.Login(username, password)
+	if err != nil {
+		fmt.Println(err.Error())
+		os.Exit(1)
+	}
+
+	remoteMedia, err := api.SyncFull()
+	if err != nil {
+		log.Fatalln(err.Error())
+	}
+	backup_progress := progressbar.Default(int64(len(remoteMedia)), "Backing up")
+
+OUTER:
+	for _, v := range remoteMedia {
+		fullMedia, err := api.GetFullMedia(v.Id)
+		if err != nil {
+			continue
+		}
+		created_at := time.UnixMilli(v.Timestamp)
+		year, month, day := fmt.Sprintf("%v", created_at.Year()), fmt.Sprintf("%v", int(created_at.Month())), fmt.Sprintf("%v", created_at.Day())
+		folderPath := filepath.Join(dest, year, month, day)
+		err = os.MkdirAll(folderPath, 0750)
+		if err != nil {
+			fmt.Println("Error creating directory:", err)
+			return
+		}
+
+		filePath := filepath.Join(folderPath, fullMedia.FileName)
+
+		_, err = os.Stat(filePath)
+		if os.IsNotExist(err) {
+			clcli.DownloadFile(fullMedia.MediaURL, filePath)
+		} else {
+			checksum, err := clcli.CalculateChecksums(filePath)
+			if err != nil {
+				backup_progress.Add(1)
+				continue
+			}
+			if checksum == v.Checksum {
+				backup_progress.Add(1)
+				continue
+			} else {
+			INNER:
+				for i := 1; ; i++ {
+					ext := filepath.Ext(fullMedia.FileName)
+					fileNameWithoutExt := fullMedia.FileName[:len(fullMedia.FileName)-len(ext)]
+					newFileName := fmt.Sprintf("%v_%v%v", fileNameWithoutExt, i, ext)
+					newFilePath := filepath.Join(folderPath, newFileName)
+					_, err = os.Stat(newFilePath)
+					if os.IsNotExist(err) {
+						backup_progress.Add(1)
+						clcli.DownloadFile(fullMedia.MediaURL, newFilePath)
+					} else {
+						newChecksum, err := clcli.CalculateChecksums(newFilePath)
+						if err != nil {
+							backup_progress.Add(1)
+							continue OUTER
+						}
+						if newChecksum == v.Checksum {
+							backup_progress.Add(1)
+							continue OUTER
+						} else {
+							continue INNER
+						}
+
+					}
+
+				}
+			}
+
+		}
+	}
+
 }
 
 func CreateUser(api clcli.API, username string) {
@@ -138,7 +221,7 @@ func TimestampAndMIMEType(path string) (string, string, error) {
 		return "", "", fmt.Errorf("No MIME type found for file %v", path)
 	}
 
-	ALLOWED_CONTENT_TYPES := []string{"image/png", "image/jpeg", "image/heic", "image/heif"}
+	ALLOWED_CONTENT_TYPES := []string{"image/png", "image/jpeg", "image/heic", "image/heif", "image/x-adobe-dng"}
 
 	if !slices.Contains(ALLOWED_CONTENT_TYPES, mime_type_string) {
 		return "", "", fmt.Errorf("Unsupported filetype for file %v", path)

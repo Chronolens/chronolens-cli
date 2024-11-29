@@ -172,7 +172,9 @@ func (api API) Upload(path, checksum, timestamp, mimeType string) (int, error) {
 }
 
 type remoteMedia struct {
-	Checksum string `json:"hash,omitempty"`
+	Id        string `json:"id"`
+    Timestamp int64  `json:"created_at"`
+	Checksum  string `json:"hash"`
 }
 
 func (api API) SyncFull() ([]remoteMedia, error) {
@@ -207,6 +209,58 @@ func (api API) SyncFull() ([]remoteMedia, error) {
 	}
 
 	return syncFull, nil
+}
+
+type FullMedia struct {
+	// ID                      string  `json:"id"`
+	MediaURL string `json:"media_url"`
+	// CreatedAt               int64   `json:"created_at"`
+	// FileSize                int64   `json:"file_size"`
+	FileName string `json:"file_name"`
+	// Longitude               float64 `json:"longitude"`
+	// Latitude                float64 `json:"latitude"`
+	// ImageWidth              int64   `json:"image_width"`
+	// ImageLength             int64   `json:"image_length"`
+	// Make                    string  `json:"make"`
+	// Model                   string  `json:"model"`
+	// Fnumber                 string  `json:"fnumber"`
+	// ExposureTime            string  `json:"exposure_time"`
+	// PhotographicSensitivity string  `json:"photographic_sensitivity"`
+	// Orientation             int64   `json:"orientation"`
+}
+
+func (api API) GetFullMedia(id string) (FullMedia, error) {
+	endpoint := fmt.Sprintf("%v/media/%v", api.base_url, id)
+	req, err := http.NewRequest("GET", endpoint, nil)
+	if err != nil {
+		return FullMedia{}, err
+	}
+	req.Header.Add("Authorization", fmt.Sprintf("Bearer %v", api.tokens.Access_token))
+	req.Header.Add("Accept", "application/json")
+
+	resp, err := api.client.Do(req)
+	if err != nil {
+		return FullMedia{}, err
+	}
+
+	if resp.StatusCode == http.StatusUnauthorized {
+		err = api.RefreshToken()
+		if err != nil {
+			return FullMedia{}, err
+		}
+		return api.GetFullMedia(id)
+	}
+
+	var fullMedia FullMedia
+
+	decoder := json.NewDecoder(resp.Body)
+
+	err = decoder.Decode(&fullMedia)
+	if err != nil {
+		return FullMedia{}, err
+	}
+
+	return fullMedia, nil
 }
 
 func (api *API) RefreshToken() error {

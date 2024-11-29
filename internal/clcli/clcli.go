@@ -17,6 +17,11 @@ var CLI struct {
 	CreateUser struct {
 		Username string `help:"The username of the user to create"`
 	} `cmd:"" help:"Create a new user in the chronolens instance"`
+
+	Backup struct {
+		Username string `help:"The username of the user to backup"`
+        Dest  string `help:"The backup's destination folder"`
+	} `cmd:"" help:"Backup a user's photos locally"`
 }
 
 func Run() {
@@ -29,6 +34,8 @@ func Run() {
 		commands.Upload(api, CLI.Upload.Path, CLI.Upload.Username)
 	case "create-user":
 		commands.CreateUser(api,CLI.CreateUser.Username)
+    case "backup":
+        commands.Backup(api,CLI.Backup.Dest,CLI.Backup.Username)
 	default:
 	}
 
